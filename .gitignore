@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+venv/
+.venv/
+
+# Environment / secrets
+.env
+
+# Database
+*.db
+
+# Logs
+*.log
+
+# Temp files from try-on processor
+temp_*.png
+temp_multi_*.png
+temp_room_*.png
+bot_temp/
+temp_photos/
+
+# User data (photos, results)
+bot_photos/
+bot_result/
+photoresult/
+photos/
+product-photos/
+room/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc data files
+product_info.csv
+productids.txt
+productsets.txt
+producturl.txt
