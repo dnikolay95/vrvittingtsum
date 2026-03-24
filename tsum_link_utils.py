@@ -10,6 +10,25 @@ import requests
 TSUM_PRODUCT_API = "https://api.tsum.ru/v1/catalog/product/"
 
 
+def extract_product_slug_prefix_from_url(url: str) -> Optional[str]:
+    """
+    Для ссылок вида https://www.tsum.ru/product/he00852863-sviter-.../
+    числового id в URL нет (артикул/modelExtId в начале слага).
+    Возвращает первый сегмент до дефиса: he00852863 — для поиска в HTML по modelExtId.
+    """
+    path = (url or "").strip().split("?")[0].split("#")[0].rstrip("/")
+    m = re.search(r"/product/([^/?#]+)", path, re.IGNORECASE)
+    if not m:
+        return None
+    first = (m.group(1) or "").split("-")[0].strip()
+    if not first or len(first) < 3:
+        return None
+    # Буквы+цифры или только цифры (для нестандартных слагов)
+    if re.match(r"^[A-Za-z]{0,4}\d+|^\d{5,}$", first):
+        return first
+    return None
+
+
 def extract_product_id_from_url(url: str) -> Optional[str]:
     """
     Достаёт ID товара из URL Tsum.
@@ -79,14 +98,39 @@ def _extract_product_id_from_html(url: str, fallback_number: Optional[str] = Non
 
     # Если знаем число из URL (артикул), пробуем найти объект, где рядом modelExtId и id
     if slug_num:
-        patterns = [
-            rf'"id"\s*:\s*(\d+)[^{{}}]*"modelExtId"\s*:\s*"{re.escape(slug_num)}"',
-            rf'"modelExtId"\s*:\s*"{re.escape(slug_num)}"[^{{}}]*"id"\s*:\s*(\d+)',
-        ]
-        for pat in patterns:
-            m = re.search(pat, html, re.DOTALL)
-            if m:
-                return m.group(1)
+        # TSUM в JSON часто хранит modelExtId в ВЕРХНЕМ регистре (HE00852863),
+        # в URL слаг может быть ниже (he00852863).
+        variants = list(
+            dict.fromkeys(
+                [slug_num, slug_num.upper(), slug_num.lower()]
+            )
+        )
+        for sn in variants:
+            esc = re.escape(sn)
+            patterns = [
+                rf'"id"\s*:\s*(\d+)[^{{}}]*"modelExtId"\s*:\s*"{esc}"',
+                rf'"modelExtId"\s*:\s*"{esc}"[^{{}}]*"id"\s*:\s*(\d+)',
+                rf"'id'\s*:\s*(\d+)[^{{}}]*'modelExtId'\s*:\s*'{esc}'",
+                rf"'modelExtId'\s*:\s*'{esc}'[^{{}}]*'id'\s*:\s*(\d+)",
+            ]
+            for pat in patterns:
+                m = re.search(pat, html, re.DOTALL | re.IGNORECASE)
+                if m:
+                    return m.group(1)
+            blob = re.search(
+                rf'"modelExtId"\s*:\s*"{esc}"[\s\S]{{0,500}}?"id"\s*:\s*(\d{{6,9}})',
+                html,
+                re.IGNORECASE,
+            )
+            if blob:
+                return blob.group(1)
+            blob2 = re.search(
+                rf'"id"\s*:\s*(\d{{6,9}})[\s\S]{{0,500}}?"modelExtId"\s*:\s*"{esc}"',
+                html,
+                re.IGNORECASE,
+            )
+            if blob2:
+                return blob2.group(1)
 
     # Фолбэк: берём первое правдоподобное \"id\": 123456 в JSON на странице
     m = re.search(r'"id"\s*:\s*(\d{6,9})', html)
@@ -139,14 +183,18 @@ def get_product_id_and_info(link: str) -> Optional[Dict[str, Any]]:
 
     # 1. Пытаемся использовать число из URL как product_id
     pid_from_url = extract_product_id_from_url(link)
+    slug_prefix = extract_product_slug_prefix_from_url(link)
+
     if pid_from_url:
         info = get_product_info_for_bot(pid_from_url)
         if info:
             info["product_link"] = link
             return info
 
-    # 2. Пытаемся вытащить настоящий id из HTML
-    pid_html = _extract_product_id_from_html(link, fallback_number=pid_from_url)
+    # 2. Пытаемся вытащить настоящий id из HTML (в т.ч. по артикулу/modelExtId в слаге)
+    pid_html = _extract_product_id_from_html(
+        link, fallback_number=pid_from_url or slug_prefix
+    )
     if not pid_html:
         return None
     info = get_product_info_for_bot(pid_html)

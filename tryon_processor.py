@@ -1275,6 +1275,8 @@ class TsumTryOnProcessor:
                    body_part: Optional[str] = "upper",
                    product_info_csv: Optional[str] = "product_info.csv",
                    product_ids_file: Optional[str] = "productids.txt",
+                   product_ids_override: Optional[List[str]] = None,
+                   product_photo_key: str = "w2000_1",
                    room_dir: Optional[str] = None) -> List[Dict]:
         """Основная функция обработки всех товаров (без ограничений по количеству)"""
         
@@ -1299,17 +1301,20 @@ class TsumTryOnProcessor:
             return []
         
         # Загружаем список ID товаров
-        product_ids_list = []
-        if product_ids_file and os.path.exists(product_ids_file):
-            try:
-                with open(product_ids_file, "r", encoding="utf-8") as f:
-                    product_ids_list = [line.strip() for line in f if line.strip()]
-            except Exception as e:
-                logger.error(f"Не удалось прочитать ID товаров из {product_ids_file}: {e}")
-                return []
+        product_ids_list: List[str] = []
+        if product_ids_override:
+            product_ids_list = [pid for pid in product_ids_override if pid]
         else:
-            logger.error(f"Файл с ID товаров не найден: {product_ids_file}")
-            return []
+            if product_ids_file and os.path.exists(product_ids_file):
+                try:
+                    with open(product_ids_file, "r", encoding="utf-8") as f:
+                        product_ids_list = [line.strip() for line in f if line.strip()]
+                except Exception as e:
+                    logger.error(f"Не удалось прочитать ID товаров из {product_ids_file}: {e}")
+                    return []
+            else:
+                logger.error(f"Файл с ID товаров не найден: {product_ids_file}")
+                return []
         
         if not product_ids_list:
             logger.error(f"Нет ID товаров в файле {product_ids_file}")
@@ -1348,6 +1353,9 @@ class TsumTryOnProcessor:
                 'flux_local_path': None,
                 'flux_link': None,
                 'flux_status': 'pending',
+                'gemini_local_path': None,
+                'gemini_link': None,
+                'gemini_status': 'pending',
             }
 
             try:
@@ -1357,10 +1365,15 @@ class TsumTryOnProcessor:
                     logger.error(f"Информация о товаре #{i} (ID: {product_id}) не найдена в CSV")
                     return result_entry
                 
-                # 2. Проверяем наличие фото товара
-                product_image_url = product_info.get("w2000_1")
+                # 2. Проверяем наличие фото товара (по выбору 1/2)
+                photo_key = product_photo_key or "w2000_1"
+                product_image_url = (
+                    product_info.get(photo_key)
+                    or product_info.get("w2000_1")
+                    or product_info.get("w2000_2")
+                )
                 if not product_image_url:
-                    logger.error(f"В CSV нет w2000_1 для товара #{i} (ID: {product_id})")
+                    logger.error(f"В CSV нет {photo_key} для товара #{i} (ID: {product_id})")
                     return result_entry
                 
                 logger.info(f"Использую фото товара из CSV: {product_image_url[:60]}...")
@@ -1372,8 +1385,23 @@ class TsumTryOnProcessor:
                     return result_entry
                 result_entry['product_path'] = product_image_path
                 
-                # 4. Выполняем примерку: один или оба адаптера (асинхронно через ThreadPool)
-                adapters = ['banana', 'flux'] if adapter == 'both' else [adapter]
+                # 4. Выбираем адаптеры (модели) для сравнения
+                if adapter == "banana":
+                    adapters = ["banana"]
+                elif adapter == "flux":
+                    adapters = ["flux"]
+                elif adapter == "gemini":
+                    adapters = ["gemini-3.1-flash-image-preview"]
+                elif adapter == "banana_flux":
+                    adapters = ["banana", "flux"]
+                elif adapter == "banana_gemini":
+                    adapters = ["banana", "gemini-3.1-flash-image-preview"]
+                elif adapter == "flux_gemini":
+                    adapters = ["flux", "gemini-3.1-flash-image-preview"]
+                elif adapter == "all_three":
+                    adapters = ["banana", "flux", "gemini-3.1-flash-image-preview"]
+                else:
+                    adapters = ["banana"]
                 any_success = False
 
                 def run_adapter(ad: str):
@@ -1407,7 +1435,7 @@ class TsumTryOnProcessor:
                             logger.error(f"Ошибка в потоке адаптера: {e}")
                             continue
 
-                        key_prefix = ad
+                        key_prefix = "gemini" if "gemini" in ad else ad
 
                         if not tryon_result_path:
                             result_entry[f"{key_prefix}_status"] = 'failed'

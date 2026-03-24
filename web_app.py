@@ -148,21 +148,37 @@ def list_product_photos():
     return sorted([p for p in os.listdir(PRODUCT_PHOTOS_DIR) if p.lower().endswith(exts)])
 
 
-def run_tryon(person_path: str, adapter: str, body_part: str):
+def run_tryon(person_path: str, adapter: str, body_part: str, product_photo_key: str):
     with state_lock:
         state.update({"running": True, "status": "Запущено", "last_error": ""})
     try:
-        print(f"[WEB] run_tryon: adapter={adapter}, body_part={body_part}, person_path={person_path}")
-        processor = TsumTryOnProcessor(prompts_file=PROMPTS_FILE)
-        results = processor.process_all(
-            person_photo_path=person_path,
-            output_dir=OUTPUT_DIR,
-            temp_dir=TEMP_DIR,
-            adapter=adapter,
-            body_part=body_part or "upper",
-            product_info_csv=PRODUCT_INFO_CSV,
-            product_ids_file=PRODUCT_IDS_FILE,
+        print(
+            f"[WEB] run_tryon: adapter_mode={adapter}, body_part={body_part}, "
+            f"product_photo_key={product_photo_key}, person_path={person_path}"
         )
+        processor = TsumTryOnProcessor(prompts_file=PROMPTS_FILE)
+        # Читаем все ID товаров
+        all_ids = read_product_ids(PRODUCT_IDS_FILE)
+        if not all_ids:
+            raise Exception("Нет ID товаров в productids.txt")
+
+        results = []
+        # Батчами по 10 товаров
+        for offset in range(0, len(all_ids), 10):
+            batch_ids = all_ids[offset:offset + 10]
+            print(f"[WEB] run_tryon: batch {offset//10 + 1}, ids={batch_ids}")
+            batch_results = processor.process_all(
+                person_photo_path=person_path,
+                output_dir=OUTPUT_DIR,
+                temp_dir=TEMP_DIR,
+                adapter=adapter,
+                body_part=body_part or "upper",
+                product_info_csv=PRODUCT_INFO_CSV,
+                product_ids_file=PRODUCT_IDS_FILE,
+                product_ids_override=batch_ids,
+                product_photo_key=product_photo_key,
+            )
+            results.extend(batch_results)
         with state_lock:
             state["last_results"] = results
             state["status"] = "Готово"
@@ -182,7 +198,7 @@ def run_tryon_with_example(person_path: str, adapter: str, body_part: str):
     with state_lock:
         state.update({"running": True, "status": "Запущено (с примером)", "last_error": ""})
     try:
-        print(f"[WEB] run_tryon_with_example: adapter={adapter}, body_part={body_part}, person_path={person_path}")
+        print(f"[WEB] run_tryon_with_example: adapter_mode={adapter}, body_part={body_part}, person_path={person_path}")
         processor = TsumTryOnProcessor(prompts_file=PROMPTS_FILE)
         
         # Загружаем информацию о товарах
@@ -206,6 +222,24 @@ def run_tryon_with_example(person_path: str, adapter: str, body_part: str):
         os.makedirs(TEMP_DIR, exist_ok=True)
         
         results = []
+
+        # Определяем, какие адаптеры запускать по выбранному режиму
+        if adapter == "banana":
+            adapters = ["banana"]
+        elif adapter == "flux":
+            adapters = ["flux"]
+        elif adapter == "gemini":
+            adapters = ["gemini-3.1-flash-image-preview"]
+        elif adapter == "banana_flux":
+            adapters = ["banana", "flux"]
+        elif adapter == "banana_gemini":
+            adapters = ["banana", "gemini-3.1-flash-image-preview"]
+        elif adapter == "flux_gemini":
+            adapters = ["flux", "gemini-3.1-flash-image-preview"]
+        elif adapter == "all_three":
+            adapters = ["banana", "flux", "gemini-3.1-flash-image-preview"]
+        else:
+            adapters = ["banana"]
         
         # Обрабатываем все товары
         for i, product_id in enumerate(product_ids_list, 1):
@@ -234,9 +268,7 @@ def run_tryon_with_example(person_path: str, adapter: str, body_part: str):
                 if not product_image2_path:
                     logger.warning(f"Не удалось скачать второе фото товара #{i}, продолжаю без него")
             
-            # Выполняем примерку с примером
-            adapters = ['banana', 'flux'] if adapter == 'both' else [adapter]
-            
+            # Выполняем примерку с примером для выбранных моделей
             for ad in adapters:
                 tryon_result_path = processor.process_tryon_with_example(
                     person_image_path=person_path,
@@ -488,11 +520,21 @@ PAGE_TEMPLATE = """
   <div id="tab-single" class="tab-content active">
   <form action="{{ url_for('start_run') }}" method="post" enctype="multipart/form-data">
     <h2>Обычная примерка</h2>
-    <label>Адаптер:
+    <label>Фото товара:
+      <select name="product_photo">
+        <option value="w2000_1">первое (w2000_1)</option>
+        <option value="w2000_2">второе (w2000_2)</option>
+      </select>
+    </label>
+    <label style="margin-left:10px;">Модели:
       <select name="adapter">
-        <option value="banana" {% if adapter=='banana' %}selected{% endif %}>banana</option>
-        <option value="flux" {% if adapter=='flux' %}selected{% endif %}>flux</option>
-        <option value="both" {% if adapter=='both' %}selected{% endif %}>оба</option>
+        <option value="banana" {% if adapter=='banana' %}selected{% endif %}>banana (только)</option>
+        <option value="flux" {% if adapter=='flux' %}selected{% endif %}>flux (только)</option>
+        <option value="gemini" {% if adapter=='gemini' %}selected{% endif %}>gemini-3.1-flash-image-preview (только)</option>
+        <option value="banana_flux" {% if adapter=='banana_flux' %}selected{% endif %}>banana + flux</option>
+        <option value="banana_gemini" {% if adapter=='banana_gemini' %}selected{% endif %}>banana + gemini</option>
+        <option value="flux_gemini" {% if adapter=='flux_gemini' %}selected{% endif %}>flux + gemini</option>
+        <option value="all_three" {% if adapter=='all_three' %}selected{% endif %}>все три</option>
       </select>
     </label>
     <label style="margin-left:10px;">body_part:
@@ -595,11 +637,15 @@ PAGE_TEMPLATE = """
   <div id="tab-example" class="tab-content">
   <form action="{{ url_for('start_run_with_example') }}" method="post" enctype="multipart/form-data">
     <h2>Примерка с примером</h2>
-    <label>Адаптер:
+    <label>Модели:
       <select name="adapter">
-        <option value="banana" {% if adapter=='banana' %}selected{% endif %}>banana</option>
-        <option value="flux" {% if adapter=='flux' %}selected{% endif %}>flux</option>
-        <option value="both" {% if adapter=='both' %}selected{% endif %}>оба</option>
+        <option value="banana" {% if adapter=='banana' %}selected{% endif %}>banana (только)</option>
+        <option value="flux" {% if adapter=='flux' %}selected{% endif %}>flux (только)</option>
+        <option value="gemini" {% if adapter=='gemini' %}selected{% endif %}>gemini-3.1-flash-image-preview (только)</option>
+        <option value="banana_flux" {% if adapter=='banana_flux' %}selected{% endif %}>banana + flux</option>
+        <option value="banana_gemini" {% if adapter=='banana_gemini' %}selected{% endif %}>banana + gemini</option>
+        <option value="flux_gemini" {% if adapter=='flux_gemini' %}selected{% endif %}>flux + gemini</option>
+        <option value="all_three" {% if adapter=='all_three' %}selected{% endif %}>все три</option>
       </select>
     </label>
     <label style="margin-left:10px;">body_part:
@@ -913,6 +959,15 @@ PAGE_TEMPLATE = """
             <div><a href="{{ r.flux_link }}" target="_blank">CDN</a></div>
           {% endif %}
         </div>
+        <div class="result-cell">
+          <div class="result-tag">gemini</div>
+          {% if r.gemini_local_path %}
+            <img src="{{ url_for('serve_result', filename=r.gemini_local_path.split(os_sep)[-1]) }}" style="max-width:100%; height:auto;">
+          {% endif %}
+          {% if r.gemini_link %}
+            <div><a href="{{ r.gemini_link }}" target="_blank">CDN</a></div>
+          {% endif %}
+        </div>
       </div>
     {% endfor %}
   {% else %}
@@ -1040,6 +1095,7 @@ def run_enrichment():
 @app.route("/run", methods=["POST"])
 def start_run():
     adapter = request.form.get("adapter", "banana")
+    product_photo_key = request.form.get("product_photo") or "w2000_1"
     body_part = request.form.get("body_part") or "upper"
     person_choice = request.form.get("person_choice") or ""
 
@@ -1062,7 +1118,11 @@ def start_run():
         state["status"] = "Запуск..."
         state["last_error"] = ""
 
-    thread = threading.Thread(target=run_tryon, args=(person_path, adapter, body_part), daemon=True)
+    thread = threading.Thread(
+        target=run_tryon,
+        args=(person_path, adapter, body_part, product_photo_key),
+        daemon=True,
+    )
     thread.start()
     return redirect(url_for("index"))
 
