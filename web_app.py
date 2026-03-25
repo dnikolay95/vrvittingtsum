@@ -354,7 +354,7 @@ def run_tryon_local_photos(person_path: str, adapter: str, body_part: str):
             state["running"] = False
 
 
-def run_tryon_multi_sets(person_path: str, adapter: str, body_part: str):
+def run_tryon_multi_sets(person_path: str, adapter: str, body_part: str, product_photo_key: str):
     """
     Запускает мульти-примерку:
     одно фото человека + несколько товаров в каждой строке (наборе).
@@ -366,7 +366,8 @@ def run_tryon_multi_sets(person_path: str, adapter: str, body_part: str):
     try:
         print(
             f"[WEB] run_tryon_multi_sets: adapter={adapter}, "
-            f"body_part={body_part}, person_path={person_path}"
+            f"body_part={body_part}, product_photo_key={product_photo_key}, "
+            f"person_path={person_path}"
         )
         processor = TsumTryOnProcessor(prompts_file=PROMPTS_FILE)
 
@@ -395,6 +396,7 @@ def run_tryon_multi_sets(person_path: str, adapter: str, body_part: str):
             adapter=adapter,
             body_part=body_part or "upper",
             product_info_csv=PRODUCT_INFO_CSV,
+            product_photo_key=product_photo_key,
         )
 
         with state_lock:
@@ -778,6 +780,13 @@ PAGE_TEMPLATE = """
 
   <form action="{{ url_for('start_run_multi_sets') }}" method="post" enctype="multipart/form-data">
     <h3>Запуск мульти-примерки</h3>
+    <label>Фото товара:
+      <select name="product_photo">
+        <option value="w2000_1">первое (w2000_1)</option>
+        <option value="w2000_2">второе (w2000_2)</option>
+        <option value="w2000_3">третье (w2000_3)</option>
+      </select>
+    </label>
     <label>Адаптер:
       <select name="adapter">
         <option value="banana" {% if adapter=='banana' %}selected{% endif %}>banana</option>
@@ -1227,6 +1236,7 @@ def start_run_with_room():
 @app.route("/run_multi_sets", methods=["POST"])
 def start_run_multi_sets():
     adapter = request.form.get("adapter", "banana")
+    product_photo_key = request.form.get("product_photo") or "w2000_1"
     body_part = request.form.get("body_part") or "upper"
     person_choice = request.form.get("person_choice") or ""
 
@@ -1251,7 +1261,7 @@ def start_run_multi_sets():
 
     thread = threading.Thread(
         target=run_tryon_multi_sets,
-        args=(person_path, adapter, body_part),
+        args=(person_path, adapter, body_part, product_photo_key),
         daemon=True,
     )
     thread.start()

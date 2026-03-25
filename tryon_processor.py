@@ -994,6 +994,7 @@ class TsumTryOnProcessor:
         adapter: str = "banana",
         body_part: Optional[str] = "upper",
         product_info_csv: Optional[str] = "product_info.csv",
+        product_photo_key: str = "w2000_1",
     ) -> List[Dict]:
         """
         Обработка мульти-наборов товаров:
@@ -1066,9 +1067,17 @@ class TsumTryOnProcessor:
 
                     # 2. Извлекаем нужные поля (в т.ч. w2000_1)
                     info = extract_product_info(raw)
-                    url = info.get("w2000_1")
+                    url = (
+                        info.get(product_photo_key)
+                        or info.get("w2000_1")
+                        or info.get("w2000_2")
+                        or info.get("w2000_3")
+                    )
                     if not url:
-                        logger.warning(f"[multi] Нет w2000_1 для товара {pid} в ответе TSUM API, пропускаю его")
+                        logger.warning(
+                            f"[multi] Нет фото товара ({product_photo_key}) для {pid} в ответе TSUM API, "
+                            f"пропускаю его"
+                        )
                         continue
 
                     # 3. Скачиваем фото
