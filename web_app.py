@@ -524,6 +524,7 @@ PAGE_TEMPLATE = """
       <select name="product_photo">
         <option value="w2000_1">первое (w2000_1)</option>
         <option value="w2000_2">второе (w2000_2)</option>
+        <option value="w2000_3">третье (w2000_3)</option>
       </select>
     </label>
     <label style="margin-left:10px;">Модели:
@@ -531,6 +532,7 @@ PAGE_TEMPLATE = """
         <option value="banana" {% if adapter=='banana' %}selected{% endif %}>banana (только)</option>
         <option value="flux" {% if adapter=='flux' %}selected{% endif %}>flux (только)</option>
         <option value="gemini" {% if adapter=='gemini' %}selected{% endif %}>gemini-3.1-flash-image-preview (только)</option>
+        <option value="default" {% if adapter=='default' %}selected{% endif %}>по умолчанию (без adapter/prompt)</option>
         <option value="banana_flux" {% if adapter=='banana_flux' %}selected{% endif %}>banana + flux</option>
         <option value="banana_gemini" {% if adapter=='banana_gemini' %}selected{% endif %}>banana + gemini</option>
         <option value="flux_gemini" {% if adapter=='flux_gemini' %}selected{% endif %}>flux + gemini</option>
@@ -966,6 +968,15 @@ PAGE_TEMPLATE = """
           {% endif %}
           {% if r.gemini_link %}
             <div><a href="{{ r.gemini_link }}" target="_blank">CDN</a></div>
+          {% endif %}
+        </div>
+        <div class="result-cell">
+          <div class="result-tag">default</div>
+          {% if r.default_local_path %}
+            <img src="{{ url_for('serve_result', filename=r.default_local_path.split(os_sep)[-1]) }}" style="max-width:100%; height:auto;">
+          {% endif %}
+          {% if r.default_link %}
+            <div><a href="{{ r.default_link }}" target="_blank">CDN</a></div>
           {% endif %}
         </div>
       </div>

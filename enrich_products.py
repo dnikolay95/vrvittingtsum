@@ -83,9 +83,10 @@ def extract_product_info(raw: Dict[str, Any]) -> Dict[str, Optional[str]]:
     if isinstance(color, dict):
         color_title = color.get("title")
 
-    # Берём первые два значения w2000 из массива images
+    # Берём первые три значения w2000 из массива images
     w2000_first: Optional[str] = None
     w2000_second: Optional[str] = None
+    w2000_third: Optional[str] = None
     images = raw.get("images")
     if isinstance(images, list):
         urls: List[str] = []
@@ -98,6 +99,8 @@ def extract_product_info(raw: Dict[str, Any]) -> Dict[str, Optional[str]]:
             w2000_first = urls[0]
         if len(urls) >= 2:
             w2000_second = urls[1]
+        if len(urls) >= 3:
+            w2000_third = urls[2]
 
     composition: Optional[str] = None
     size_info1: Optional[str] = None
@@ -155,6 +158,7 @@ def extract_product_info(raw: Dict[str, Any]) -> Dict[str, Optional[str]]:
         "category_title": str(category_title) if category_title is not None else None,
         "w2000_1": w2000_first,
         "w2000_2": w2000_second,
+        "w2000_3": w2000_third,
         "composition": composition,
         "size_info1": size_info1,
         "size_info2": size_info2,
@@ -186,6 +190,7 @@ def enrich_products(
                     "category_title": None,
                     "w2000_1": None,
                     "w2000_2": None,
+                    "w2000_3": None,
                     "composition": None,
                     "size_info1": None,
                     "size_info2": None,
@@ -210,6 +215,7 @@ def enrich_products(
         "category_title",
         "w2000_1",
         "w2000_2",
+        "w2000_3",
         "composition",
         "size_info1",
         "size_info2",

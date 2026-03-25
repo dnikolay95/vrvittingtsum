@@ -308,20 +308,23 @@ class TsumTryOnProcessor:
         """Выполняет примерку с примером (3 файла: person, product, product2) и возвращает путь к результату"""
         
         # Используем обычный промпт (не _multi), но с упоминанием PRODUCT_IMAGE2
-        prompt_key = adapter if adapter in ["banana", "flux"] else "banana"
-        prompt = self.prompts.get(prompt_key, "")
-        prompt = self.substitute_prompt_placeholders(prompt, product_info)
+        # В режиме "default" не передаем ни adapter, ни prompt в запрос.
+        if adapter == "default":
+            prompt = None
+        else:
+            prompt_key = adapter if adapter in ["banana", "flux"] else "banana"
+            prompt = self.prompts.get(prompt_key, "")
+            prompt = self.substitute_prompt_placeholders(prompt, product_info)
         
         try:
             logger.info("Отправляю запрос на примерку с примером (v3, multipart, 3 файла)...")
             tryon_url = f"{self.tryon_base_url}{self.tryon_tryon_path}"
             params = {"body_part": body_part} if body_part else {}
             
-            data = {
-                "productId": str(product_id),
-                "adapter": adapter,
-                "prompt": prompt,
-            }
+            data = {"productId": str(product_id)}
+            if adapter != "default":
+                data["adapter"] = adapter
+                data["prompt"] = prompt
             
             # Создаем отдельную сессию на запрос (requests.Session не потокобезопасен)
             session = requests.Session()
@@ -425,10 +428,14 @@ class TsumTryOnProcessor:
         Использует промт banana_multi / flux_multi и отправляет несколько файлов "product".
         """
 
-        # Выбираем мульти-промт для адаптера
-        prompt_key = f"{adapter}_multi" if f"{adapter}_multi" in self.prompts else adapter
-        prompt = self.prompts.get(prompt_key, "")
-        prompt = self.substitute_prompt_placeholders(prompt, product_info)
+        # В режиме "default" не передаём ни adapter, ни prompt в запрос.
+        if adapter == "default":
+            prompt = ""
+        else:
+            # Выбираем мульти-промт для адаптера
+            prompt_key = f"{adapter}_multi" if f"{adapter}_multi" in self.prompts else adapter
+            prompt = self.prompts.get(prompt_key, "")
+            prompt = self.substitute_prompt_placeholders(prompt, product_info)
 
         try:
             logger.info(
@@ -442,10 +449,11 @@ class TsumTryOnProcessor:
 
             # Формируем form-data как список пар, чтобы можно было передать несколько productIds
             form_data: List[tuple] = []
-            # adapter
-            form_data.append(("adapter", adapter))
-            # мульти-промт
-            form_data.append(("promptMulti", prompt))
+            if adapter != "default":
+                # adapter
+                form_data.append(("adapter", adapter))
+                # мульти-промт
+                form_data.append(("promptMulti", prompt))
             # список productIds (по одному полю на каждый ID товара в наборе)
             for pid in product_ids:
                 pid_str = str(pid).strip()
@@ -701,20 +709,24 @@ class TsumTryOnProcessor:
         В промте можно ссылаться на PRODUCT_IMAGE (будет два: одежда и примерочная).
         """
 
-        # Используем отдельные промты banana_room / flux_room при наличии
-        room_key = f"{adapter}_room"
-        if room_key in self.prompts:
-            prompt_key = room_key
+        # В режиме "default" не передаём ни adapter, ни prompt в запрос.
+        if adapter == "default":
+            prompt = None
         else:
-            prompt_key = adapter if adapter in ["banana", "flux"] else "banana"
+            # Используем отдельные промты banana_room / flux_room при наличии
+            room_key = f"{adapter}_room"
+            if room_key in self.prompts:
+                prompt_key = room_key
+            else:
+                prompt_key = adapter if adapter in ["banana", "flux"] else "banana"
 
-        prompt = self.prompts.get(prompt_key, "")
-        prompt = self.substitute_prompt_placeholders(prompt, product_info)
-        
-        # Логируем промт для проверки (полностью)
-        logger.info(f"[room] Используемый промт ({prompt_key}):")
-        logger.info(f"[room] {prompt}")
-        logger.info(f"[room] Длина промта: {len(prompt)} символов")
+            prompt = self.prompts.get(prompt_key, "")
+            prompt = self.substitute_prompt_placeholders(prompt, product_info)
+            
+            # Логируем промт для проверки (полностью)
+            logger.info(f"[room] Используемый промт ({prompt_key}):")
+            logger.info(f"[room] {prompt}")
+            logger.info(f"[room] Длина промта: {len(prompt)} символов")
 
         try:
             logger.info("Отправляю запрос на примерку с примерочной (v3, multipart)...")
@@ -726,9 +738,10 @@ class TsumTryOnProcessor:
             form_data = [
                 ("productId", str(product_id)),
                 ("productId", "9999"),  # ID для примерочной
-                ("adapter", adapter),
-                ("prompt", prompt),  # Промт передается в data/prompt
             ]
+            if adapter != "default":
+                form_data.append(("adapter", adapter))
+                form_data.append(("prompt", prompt))  # Промт передается в data/prompt
 
             session = requests.Session()
             session.headers.update(self.tryon_headers)
@@ -752,8 +765,9 @@ class TsumTryOnProcessor:
                 logger.info(f"[room]   - product[1] (одежда): {os.path.basename(product_image_path)}")
                 logger.info(f"[room]   - product[2] (комната): {os.path.basename(room_image_path)}")
                 logger.info(f"[room]   - productId: {product_id} и 9999")
-                logger.info(f"[room]   - adapter: {adapter}")
-                logger.info(f"[room]   - prompt length: {len(prompt)} символов")
+                if adapter != "default":
+                    logger.info(f"[room]   - adapter: {adapter}")
+                    logger.info(f"[room]   - prompt length: {len(prompt)} символов")
                 
                 response = session.post(
                     tryon_url,
@@ -961,6 +975,7 @@ class TsumTryOnProcessor:
                             "composition": row.get("composition", ""),
                             "w2000_1": row.get("w2000_1", "").strip(),
                             "w2000_2": row.get("w2000_2", "").strip(),
+                            "w2000_3": row.get("w2000_3", "").strip(),
                             "size_info1": row.get("size_info1", ""),
                             "size_info2": row.get("size_info2", ""),
                         }
@@ -1353,6 +1368,9 @@ class TsumTryOnProcessor:
                 'flux_local_path': None,
                 'flux_link': None,
                 'flux_status': 'pending',
+                'default_local_path': None,
+                'default_link': None,
+                'default_status': 'pending',
                 'gemini_local_path': None,
                 'gemini_link': None,
                 'gemini_status': 'pending',
@@ -1371,6 +1389,7 @@ class TsumTryOnProcessor:
                     product_info.get(photo_key)
                     or product_info.get("w2000_1")
                     or product_info.get("w2000_2")
+                    or product_info.get("w2000_3")
                 )
                 if not product_image_url:
                     logger.error(f"В CSV нет {photo_key} для товара #{i} (ID: {product_id})")
@@ -1390,6 +1409,9 @@ class TsumTryOnProcessor:
                     adapters = ["banana"]
                 elif adapter == "flux":
                     adapters = ["flux"]
+                elif adapter == "default":
+                    # В запрос не передаём ни adapter, ни prompt: TSUM использует свои дефолты
+                    adapters = ["default"]
                 elif adapter == "gemini":
                     adapters = ["gemini-3.1-flash-image-preview"]
                 elif adapter == "banana_flux":
